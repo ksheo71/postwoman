@@ -3,9 +3,18 @@
 //! UI 스레드를 막지 않도록 요청은 별도 스레드에서 실행하고,
 //! 결과는 `mpsc` 채널을 통해 앱으로 전달한다.
 
+use std::io::Read;
 use std::str::FromStr;
 use std::sync::mpsc::Sender;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// 응답 본문을 메모리에 담는 상한. 초과분은 잘라 OOM/UI 멈춤을 방지한다.
+const MAX_BODY_BYTES: u64 = 50 * 1024 * 1024; // 50 MiB
+
+/// 전체 요청 타임아웃.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// 연결(핸드셰이크) 타임아웃.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 지원하는 HTTP 메서드.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +104,8 @@ pub struct ResponseData {
     pub body: String,
     /// 본문이 JSON으로 파싱되어 pretty-print 가능한 경우 그 결과.
     pub pretty_body: Option<String>,
+    /// 본문이 크기 상한(`MAX_BODY_BYTES`)을 초과해 잘렸는지 여부.
+    pub truncated: bool,
 }
 
 /// 채널로 전달되는 실행 결과.
@@ -117,6 +128,8 @@ pub fn execute(spec: RequestSpec, tx: Sender<FetchResult>, ctx: egui::Context) {
 fn run_blocking(spec: &RequestSpec) -> FetchResult {
     let client = match reqwest::blocking::Client::builder()
         .user_agent("postwoman/0.1")
+        .timeout(REQUEST_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
         .build()
     {
         Ok(c) => c,
@@ -168,16 +181,29 @@ fn run_blocking(spec: &RequestSpec) -> FetchResult {
         .collect();
     headers.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let body = match resp.text() {
-        Ok(b) => b,
-        Err(e) => return FetchResult::Err(format!("본문 읽기 실패: {e}")),
-    };
+    // 상한 + 1바이트까지만 읽어, 초과 여부를 판별하면서도 메모리 사용을 제한한다.
+    // (Content-Length는 위조될 수 있으므로 실제 읽은 바이트로 판단한다.)
+    let mut buf = Vec::new();
+    if let Err(e) = resp.take(MAX_BODY_BYTES + 1).read_to_end(&mut buf) {
+        return FetchResult::Err(format!("본문 읽기 실패: {e}"));
+    }
+    let truncated = buf.len() as u64 > MAX_BODY_BYTES;
+    if truncated {
+        buf.truncate(MAX_BODY_BYTES as usize);
+    }
+    // text() 대신 직접 읽었으므로 UTF-8 디코딩은 손실 허용으로 처리한다.
+    let body = String::from_utf8_lossy(&buf).into_owned();
     let elapsed_ms = start.elapsed().as_millis();
-    let size_bytes = body.len();
+    let size_bytes = buf.len();
 
-    let pretty_body = serde_json::from_str::<serde_json::Value>(&body)
-        .ok()
-        .and_then(|v| serde_json::to_string_pretty(&v).ok());
+    // 잘린 본문은 불완전하므로 JSON pretty-print를 시도하지 않는다.
+    let pretty_body = if truncated {
+        None
+    } else {
+        serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| serde_json::to_string_pretty(&v).ok())
+    };
 
     FetchResult::Ok(ResponseData {
         status: status.as_u16(),
@@ -187,6 +213,7 @@ fn run_blocking(spec: &RequestSpec) -> FetchResult {
         headers,
         body,
         pretty_body,
+        truncated,
     })
 }
 

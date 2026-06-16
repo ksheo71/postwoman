@@ -413,6 +413,11 @@ fn response_meta_bar(ui: &mut egui::Ui, data: &ResponseData) {
         ui.weak(format!("⏱ {} ms", data.elapsed_ms));
         ui.separator();
         ui.weak(format!("📦 {}", human_size(data.size_bytes)));
+        if data.truncated {
+            ui.separator();
+            ui.colored_label(egui::Color32::from_rgb(220, 160, 60), "⚠ 본문이 50MB로 잘림")
+                .on_hover_text("응답이 상한을 초과해 일부만 표시됩니다.");
+        }
     });
 }
 
