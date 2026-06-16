@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Postwoman을 macOS .app 번들로 패키징한다.
-# 사용법: ./scripts/bundle-macos.sh   (먼저 `cargo build --release` 필요)
+# 사용법: ./scripts/bundle-macos.sh [바이너리경로]
+#   - 인자 없으면 target/release/postwoman 사용 (먼저 `cargo build --release` 필요)
+#   - 유니버설 빌드 등 다른 바이너리를 쓰려면 경로를 인자로 전달
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/dist/Postwoman.app"
-BIN="$ROOT/target/release/postwoman"
+BIN="${1:-$ROOT/target/release/postwoman}"
 
 if [[ ! -x "$BIN" ]]; then
   echo "릴리스 바이너리가 없습니다. 먼저 'cargo build --release'를 실행하세요." >&2
