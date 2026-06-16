@@ -1,0 +1,65 @@
+name: Release
+
+# 태그(vX.Y.Z) 푸시 시 macOS(arm64/Intel) + Windows 빌드를 만들어
+# GitHub Release에 zip으로 첨부한다. 수동 실행(workflow_dispatch)도 지원.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: macos-arm64
+          - os: macos-13
+            label: macos-x86_64
+          - os: windows-latest
+            label: windows-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Package — macOS (.app)
+        if: runner.os == 'macOS'
+        run: |
+          chmod +x scripts/bundle-macos.sh
+          ./scripts/bundle-macos.sh
+          cd dist && zip -r "../Postwoman-${{ matrix.label }}.zip" Postwoman.app
+
+      - name: Package — Windows (.exe)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target/release/postwoman.exe -DestinationPath "Postwoman-${{ matrix.label }}.zip" -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Postwoman-${{ matrix.label }}
+          path: Postwoman-${{ matrix.label }}.zip
+
+      - name: Attach to Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Postwoman-${{ matrix.label }}.zip
+          fail_on_unmatched_files: true

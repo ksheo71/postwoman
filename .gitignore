@@ -1,0 +1,5 @@
+/target
+/dist
+*.zip
+.DS_Store
+.claude/
