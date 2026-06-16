@@ -1,7 +1,7 @@
 name: Release
 
-# 태그(vX.Y.Z) 푸시 시 macOS(유니버설: Intel+Apple Silicon) + Windows 빌드를
-# 만들어 GitHub Release에 zip으로 첨부한다. 수동 실행(workflow_dispatch)도 지원.
+# 태그(vX.Y.Z) 푸시 시 macOS(Apple Silicon) + Windows 빌드를 만들어
+# GitHub Release에 zip으로 첨부한다. 수동 실행(workflow_dispatch)도 지원.
 on:
   push:
     tags:
@@ -13,43 +13,36 @@ permissions:
 
 jobs:
   build-macos:
-    name: Build (macos-universal)
+    name: Build (macos-arm64)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust (+ x86_64 target)
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
-      - name: Build both arches
-        run: |
-          cargo build --release --target x86_64-apple-darwin
-          cargo build --release --target aarch64-apple-darwin
+      - name: Build (release)
+        run: cargo build --release
 
-      - name: Make universal binary + .app bundle
+      - name: Package (.app)
         run: |
-          lipo -create -output postwoman-universal \
-            target/x86_64-apple-darwin/release/postwoman \
-            target/aarch64-apple-darwin/release/postwoman
-          ./scripts/bundle-macos.sh "$PWD/postwoman-universal"
-          cd dist && zip -r "../Postwoman-macos-universal.zip" Postwoman.app
+          ./scripts/bundle-macos.sh
+          cd dist && zip -r "../Postwoman-macos-arm64.zip" Postwoman.app
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Postwoman-macos-universal
-          path: Postwoman-macos-universal.zip
+          name: Postwoman-macos-arm64
+          path: Postwoman-macos-arm64.zip
 
       - name: Attach to Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: Postwoman-macos-universal.zip
+          files: Postwoman-macos-arm64.zip
           fail_on_unmatched_files: true
 
   build-windows:
