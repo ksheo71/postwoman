@@ -1,0 +1,47 @@
+name: CI
+
+# main 브랜치로의 push / PR마다 clippy·test·release 빌드를 검증한다.
+# (실제 배포 아티팩트는 release.yml이 태그 푸시에서 별도로 생성)
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+# 같은 ref에서 새 푸시가 오면 진행 중이던 빌드를 취소한다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 릴리스 타깃(macOS Apple Silicon + Windows)과 동일하게 검증.
+        os: [macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+      - name: Build (release)
+        run: cargo build --release
